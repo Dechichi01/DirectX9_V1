@@ -3,8 +3,6 @@
 #include "GameObject.h"
 #include "Timer.h"
 
-#define COLOR_WHITE 0xFFFFFFFF
-
 class CGameApp
 {
 public:
@@ -28,8 +26,6 @@ private:
 	void SetupGameState();
 	void SetupRenderState();
 	void AnimateObjects();
-	void DrawPrimitive(CPolygon *pPoly, D3DXMATRIX *pmtxWorld);
-	void DrawLine(const D3DXVECTOR3 &vtx1, const D3DXVECTOR3 &vtx2, ULONG color);
 
 	//Private Static Functions
 	static LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam);

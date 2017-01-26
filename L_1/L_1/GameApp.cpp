@@ -1,7 +1,5 @@
 #include "GameApp.h"
 
-#define RANDOM_COLOR COLOR_WHITE | ((rand() * 0xFFFFFF) / RAND_MAX) 
-
 
 CGameApp::CGameApp()
 {
@@ -400,7 +398,7 @@ void CGameApp::SetupRenderState()
 	//Setup view and projection matrices
 	D3DXMatrixIdentity(&m_mtxView);
 	float fAspect = (float)m_nViewWidth / (float)m_nViewHeight;
-	D3DXMatrixPerspectiveFovLH(&m_mtxProjection, 60.f, fAspect, 1.f, 1000.f);//near clip plane and far cip plane -> Camera frustum
+	D3DXMatrixPerspectiveFovLH(&m_mtxProjection, D3DXToRadian(60.f), fAspect, 1.f, 1000.f);//near clip plane and far cip plane -> Camera frustum
 
 	//Setup our D3D Device initial state
 	m_pD3DDevice->SetRenderState(D3DRS_ZENABLE, D3DZB_TRUE);//Z depth buffer
@@ -444,58 +442,6 @@ void CGameApp::AnimateObjects()
 		//Multiplcation order: rotationMtx * worldMtx
 		m_pObject[1].m_mtxWorld = mtxRotate * m_pObject[1].m_mtxWorld;
 	}
-}
-
-//Responsible for transforming polygons from modelSpace to screen space and draw them into the screen
-void CGameApp::DrawPrimitive(CPolygon * pPoly, D3DXMATRIX * pmtxWorld)
-{
-	D3DXVECTOR3 vtxPrevious, vtxCurrent;
-
-	//Loop round each vertex transforming as we go
-	for (USHORT v = 0; v < pPoly->m_nVertexCount + 1; v++)
-	{
-		vtxCurrent = (D3DXVECTOR3&)pPoly->m_pVertex[v % pPoly->m_nVertexCount];
-		//Transform vertex from Model Space to World Space
-		D3DXVec3TransformCoord(&vtxCurrent, &vtxCurrent, pmtxWorld);
-		//Transform vertex from World Space to View Space
-		D3DXVec3TransformCoord(&vtxCurrent, &vtxCurrent, &m_mtxView);
-		D3DXVec3TransformCoord(&vtxCurrent, &vtxCurrent, &m_mtxProjection);//Apply FOV
-																		   //Transform vertex from View Space to Screen Space
-		vtxCurrent.x = vtxCurrent.x *m_nViewWidth / 2 + m_nViewX + m_nViewWidth / 2;
-		vtxCurrent.y = -vtxCurrent.y  *m_nViewHeight / 2 + m_nViewY + m_nViewHeight / 2;
-
-		//Draw lines (always from previous vertex to current vertex)
-		if (v > 0)
-			DrawLine(vtxPrevious, vtxCurrent, 0);
-
-		vtxPrevious = vtxCurrent;
-	}
-}
-
-void CGameApp::DrawLine(const D3DXVECTOR3 & vtx1, const D3DXVECTOR3 & vtx2, ULONG color)
-{
-	LOGPEN logPen;
-	HPEN hPen = nullptr, hOldPen = nullptr;
-
-	//set up the rendering pen
-	logPen.lopnStyle = PS_SOLID;
-	logPen.lopnWidth.x = logPen.lopnWidth.y = 1;
-	logPen.lopnColor = COLOR_WHITE & RGB2BGR(color);
-
-	//Create the rendering pen
-	hPen = CreatePenIndirect(&logPen);
-	if (!hPen) return;
-
-	//Select into the frame buffer DC
-	hOldPen = (HPEN)SelectObject(m_hdcFrameBuffer, hPen);
-
-	//Draw line
-	MoveToEx(m_hdcFrameBuffer, (long)vtx1.x, (long)vtx1.y, NULL);
-	LineTo(m_hdcFrameBuffer, (long)vtx2.x, (long)vtx2.y);
-
-	//Destroy rendering pen
-	SelectObject(m_hdcFrameBuffer, hOldPen);
-	DeleteObject(hPen);
 }
 
 LRESULT CGameApp::StaticWndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam)
