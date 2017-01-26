@@ -279,9 +279,9 @@ void CGameApp::FrameAdvance()
 
 void CGameApp::ProcessInput()
 {
-	if (GetKeyState(VK_LEFT) && 0xFF00)
+	if (GetKeyState(VK_LEFT) & 0xFF00)
 		m_mtxView._41 += 25.f *m_Timer.GetTimeElapsed();
-	if (GetKeyState(VK_RIGHT) && 0xFF00)
+	if (GetKeyState(VK_RIGHT) & 0xFF00)
 		m_mtxView._41 -= 25.f *m_Timer.GetTimeElapsed();
 
 	if (m_pD3DDevice) m_pD3DDevice->SetTransform(D3DTS_VIEW, &m_mtxView);
