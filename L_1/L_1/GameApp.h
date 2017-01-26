@@ -3,7 +3,7 @@
 #include "GameObject.h"
 #include "Timer.h"
 
-#define COLOR_WHITE 0x00FFFFFF
+#define COLOR_WHITE 0xFFFFFFFF
 
 class CGameApp
 {
@@ -20,18 +20,24 @@ public:
 private:
 	//Private functions
 	bool BuildObjects();
+	D3DFORMAT FindDepthStencilFormat(ULONG adapterOrdinal, D3DDISPLAYMODE displayMode, D3DDEVTYPE devType);
 	void FrameAdvance();
+	void ProcessInput();
+	bool InitDirect3D();
 	bool CreateDisplay();
 	void SetupGameState();
+	void SetupRenderState();
 	void AnimateObjects();
-	void PresentFrameBuffer();
-	void ClearFrameBuffer(ULONG color);
-	bool BuildFrameBuffer(ULONG width, ULONG height);
 	void DrawPrimitive(CPolygon *pPoly, D3DXMATRIX *pmtxWorld);
 	void DrawLine(const D3DXVECTOR3 &vtx1, const D3DXVECTOR3 &vtx2, ULONG color);
 
 	//Private Static Functions
 	static LRESULT CALLBACK StaticWndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam);
+
+	//DirectX Variables
+	LPDIRECT3D9 m_pD3D;//Direct3D object
+	LPDIRECT3DDEVICE9 m_pD3DDevice;//Device object
+	D3DPRESENT_PARAMETERS m_D3DPresentParams;
 
 	//Private Variables
 	D3DXMATRIX m_mtxView; //View Matrix
@@ -47,6 +53,8 @@ private:
 	HBITMAP m_hbmFrameBuffer; // frame buffer bitmap
 	HBITMAP m_hbmSelectOut; // used for selecting out of the DC
 
+	bool m_bActive;
+	bool m_bLostDevice;
 	bool m_bRotation1; //Object 1 rotation enabled / disabled
 	bool m_bRotation2; //Object 2 rotation enabled / disabled
 

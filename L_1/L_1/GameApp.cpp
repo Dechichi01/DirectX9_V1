@@ -5,11 +5,16 @@
 
 CGameApp::CGameApp()
 {
+	m_hWnd = nullptr;
+	m_pD3D = nullptr;
+	m_pD3DDevice = nullptr;
+	m_bLostDevice = false;
 }
 
 
 CGameApp::~CGameApp()
 {
+	ShutDown();
 }
 
 //Handle Windows Messages
@@ -28,16 +33,19 @@ LRESULT CGameApp::DisplayWndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM 
 		PostQuitMessage(0);
 		break;
 	case WM_SIZE://User resized window
-				 //Store new viewport sizes
-		m_nViewWidth = LOWORD(lParam);
-		m_nViewHeight = HIWORD(lParam);
-
-		//Set up new perspective projection matrix
-		fAspect = (float)m_nViewWidth / (float)m_nViewHeight;
-		D3DXMatrixPerspectiveFovLH(&m_mtxProjection, D3DXToRadian(60.f), fAspect, 1.01f, 1000.0f);
-
-		//Rebuild the new frame buffer
-		BuildFrameBuffer(m_nViewWidth, m_nViewHeight);
+		if (wParam == SIZE_MINIMIZED) m_bActive = false;
+		else
+		{
+			m_bActive = true;
+			//Store new viewport sizes
+			m_nViewWidth = LOWORD(lParam);
+			m_nViewHeight = HIWORD(lParam);
+			if (m_pD3DDevice)
+			{
+				m_pD3DDevice->Reset(&m_D3DPresentParams);
+				SetupRenderState();
+			}
+		}
 		break;
 	case WM_COMMAND:
 		switch (LOWORD(wParam))
@@ -70,12 +78,14 @@ LRESULT CGameApp::DisplayWndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM 
 
 bool CGameApp::InitInstance(HANDLE hInstance, LPCTSTR lpCmdLine, int iCmdShow)
 {
-	//Create the primary display device
+	//Create the primary display device (also Init DirectX)
 	if (!CreateDisplay()) { ShutDown(); return false; }
 
 	if (!BuildObjects()) { ShutDown(); return false; }
 
 	SetupGameState();
+
+	SetupRenderState();
 
 	return true;
 }
@@ -102,94 +112,116 @@ int CGameApp::BeginGame()
 
 bool CGameApp::ShutDown()
 {
-	//Destroy frame buffer and associted DC's
-	if (m_hdcFrameBuffer && m_hbmFrameBuffer)
-	{
-		SelectObject(m_hdcFrameBuffer, m_hbmSelectOut);
-		DeleteObject(m_hbmFrameBuffer);
-		DeleteDC(m_hdcFrameBuffer);
-	}
-	//Destroy the render window
-	if (m_hWnd) DestroyWindow(m_hWnd);
+	if (m_pD3DDevice) m_pD3DDevice->Release();
+	if (m_pD3DDevice) m_pD3D->Release();
+	m_pD3D = nullptr;
+	m_pD3DDevice = nullptr;
 
+	if (m_hWnd) DestroyWindow(m_hWnd);
 	m_hWnd = nullptr;
-	m_hbmFrameBuffer = nullptr;
-	m_hdcFrameBuffer = nullptr;
 
 	return true;
 }
 
 bool CGameApp::BuildObjects()
 {
-	//Mesh creation
-	CPolygon *pPoly = nullptr;
+	CPolygon * pPoly = NULL;
 
+	// Seed the random number generator
+	srand(timeGetTime());
+
+	// Add 6 polygons to this mesh.
 	if (m_Mesh.AddPolygon(6) < 0) return false;
 
-	//Front face
-	pPoly = m_Mesh.m_pPolygons[0];
+	// Front Face
+	pPoly = m_Mesh.m_pPolygon[0];
 	if (pPoly->AddVertex(4) < 0) return false;
 
-	pPoly->m_pVertex[0] = CVertex(-2, 2, -2);
-	pPoly->m_pVertex[1] = CVertex(2, 2, -2);
-	pPoly->m_pVertex[2] = CVertex(2, -2, -2);
-	pPoly->m_pVertex[3] = CVertex(-2, -2, -2);
+	pPoly->m_pVertex[0] = CVertex(-2, 2, -2, RANDOM_COLOR);
+	pPoly->m_pVertex[1] = CVertex(2, 2, -2, RANDOM_COLOR);
+	pPoly->m_pVertex[2] = CVertex(2, -2, -2, RANDOM_COLOR);
+	pPoly->m_pVertex[3] = CVertex(-2, -2, -2, RANDOM_COLOR);
 
-	//Top face
-	pPoly = m_Mesh.m_pPolygons[1];
+	// Top Face
+	pPoly = m_Mesh.m_pPolygon[1];
 	if (pPoly->AddVertex(4) < 0) return false;
 
-	pPoly->m_pVertex[0] = CVertex(-2, 2, -2);
-	pPoly->m_pVertex[1] = CVertex(2, 2, -2);
-	pPoly->m_pVertex[2] = CVertex(2, 2, 2);
-	pPoly->m_pVertex[3] = CVertex(-2, 2, 2);
+	pPoly->m_pVertex[0] = CVertex(-2, 2, 2, RANDOM_COLOR);
+	pPoly->m_pVertex[1] = CVertex(2, 2, 2, RANDOM_COLOR);
+	pPoly->m_pVertex[2] = CVertex(2, 2, -2, RANDOM_COLOR);
+	pPoly->m_pVertex[3] = CVertex(-2, 2, -2, RANDOM_COLOR);
 
-	//Back face
-	pPoly = m_Mesh.m_pPolygons[2];
+	// Back Face
+	pPoly = m_Mesh.m_pPolygon[2];
 	if (pPoly->AddVertex(4) < 0) return false;
 
-	pPoly->m_pVertex[0] = CVertex(-2, -2, 2);
-	pPoly->m_pVertex[1] = CVertex(2, -2, 2);
-	pPoly->m_pVertex[2] = CVertex(2, 2, 2);
-	pPoly->m_pVertex[3] = CVertex(-2, 2, 2);
+	pPoly->m_pVertex[0] = CVertex(-2, -2, 2, RANDOM_COLOR);
+	pPoly->m_pVertex[1] = CVertex(2, -2, 2, RANDOM_COLOR);
+	pPoly->m_pVertex[2] = CVertex(2, 2, 2, RANDOM_COLOR);
+	pPoly->m_pVertex[3] = CVertex(-2, 2, 2, RANDOM_COLOR);
 
-	//Bottom face
-	pPoly = m_Mesh.m_pPolygons[3];
+	// Bottom Face
+	pPoly = m_Mesh.m_pPolygon[3];
 	if (pPoly->AddVertex(4) < 0) return false;
 
-	pPoly->m_pVertex[0] = CVertex(-2, -2, -2);
-	pPoly->m_pVertex[1] = CVertex(2, -2, -2);
-	pPoly->m_pVertex[2] = CVertex(2, -2, 2);
-	pPoly->m_pVertex[3] = CVertex(-2, -2, 2);
+	pPoly->m_pVertex[0] = CVertex(-2, -2, -2, RANDOM_COLOR);
+	pPoly->m_pVertex[1] = CVertex(2, -2, -2, RANDOM_COLOR);
+	pPoly->m_pVertex[2] = CVertex(2, -2, 2, RANDOM_COLOR);
+	pPoly->m_pVertex[3] = CVertex(-2, -2, 2, RANDOM_COLOR);
 
-	//Left Face face
-	pPoly = m_Mesh.m_pPolygons[4];
+	// Left Face
+	pPoly = m_Mesh.m_pPolygon[4];
 	if (pPoly->AddVertex(4) < 0) return false;
 
-	pPoly->m_pVertex[0] = CVertex(-2, 2, 2);
-	pPoly->m_pVertex[1] = CVertex(-2, 2, -2);
-	pPoly->m_pVertex[2] = CVertex(-2, -2, -2);
-	pPoly->m_pVertex[3] = CVertex(-2, -2, 2);
+	pPoly->m_pVertex[0] = CVertex(-2, 2, 2, RANDOM_COLOR);
+	pPoly->m_pVertex[1] = CVertex(-2, 2, -2, RANDOM_COLOR);
+	pPoly->m_pVertex[2] = CVertex(-2, -2, -2, RANDOM_COLOR);
+	pPoly->m_pVertex[3] = CVertex(-2, -2, 2, RANDOM_COLOR);
 
-	//Right face
-	pPoly = m_Mesh.m_pPolygons[5];
+	// Right Face
+	pPoly = m_Mesh.m_pPolygon[5];
 	if (pPoly->AddVertex(4) < 0) return false;
 
-	pPoly->m_pVertex[0] = CVertex(2, 2, -2);
-	pPoly->m_pVertex[1] = CVertex(2, 2, 2);
-	pPoly->m_pVertex[2] = CVertex(2, -2, 2);
-	pPoly->m_pVertex[3] = CVertex(2, -2, -2);
-	//End mesh creation
+	pPoly->m_pVertex[0] = CVertex(2, 2, -2, RANDOM_COLOR);
+	pPoly->m_pVertex[1] = CVertex(2, 2, 2, RANDOM_COLOR);
+	pPoly->m_pVertex[2] = CVertex(2, -2, 2, RANDOM_COLOR);
+	pPoly->m_pVertex[3] = CVertex(2, -2, -2, RANDOM_COLOR);
 
-	//Make the two objects reference this mesh
+	// Our two objects should reference this mesh
 	m_pObject[0].m_pMesh = &m_Mesh;
 	m_pObject[1].m_pMesh = &m_Mesh;
 
-	//Set both objects matrices so that they are offset slightly
+	// Set both objects matrices so that they are offset slightly
 	D3DXMatrixTranslation(&m_pObject[0].m_mtxWorld, -3.5f, 2.0f, 14.0f);
 	D3DXMatrixTranslation(&m_pObject[1].m_mtxWorld, 3.5f, -2.0f, 14.0f);
 
+	// Success!
 	return true;
+}
+
+D3DFORMAT CGameApp::FindDepthStencilFormat(ULONG adapterOrdinal, D3DDISPLAYMODE displayMode, D3DDEVTYPE devType)
+{
+	// Test for 32 bith depth buffer
+	if (SUCCEEDED(m_pD3D->CheckDeviceFormat(adapterOrdinal, devType, displayMode.Format, D3DUSAGE_DEPTHSTENCIL, D3DRTYPE_SURFACE, D3DFMT_D32)))
+	{
+		if (SUCCEEDED(m_pD3D->CheckDepthStencilMatch(adapterOrdinal, devType, displayMode.Format, displayMode.Format, D3DFMT_D32))) return D3DFMT_D32;
+	} // End if 32bpp Available
+
+	// Test for 24 bit depth buffer
+	if (SUCCEEDED(m_pD3D->CheckDeviceFormat(adapterOrdinal, devType, displayMode.Format, D3DUSAGE_DEPTHSTENCIL, D3DRTYPE_SURFACE, D3DFMT_D24X8)))
+	{
+		if (SUCCEEDED(m_pD3D->CheckDepthStencilMatch(adapterOrdinal, devType, displayMode.Format, displayMode.Format, D3DFMT_D24X8))) return D3DFMT_D24X8;
+	} // End if 24bpp Available
+
+	  // Test for 16 bit depth buffer
+	if (SUCCEEDED(m_pD3D->CheckDeviceFormat(adapterOrdinal, devType, displayMode.Format, D3DUSAGE_DEPTHSTENCIL, D3DRTYPE_SURFACE, D3DFMT_D16)))
+	{
+		if (SUCCEEDED(m_pD3D->CheckDepthStencilMatch(adapterOrdinal, devType, displayMode.Format, displayMode.Format, D3DFMT_D16))) return D3DFMT_D16;
+
+	} // End if 16bpp Available
+
+	//No depth buffer supported
+	return D3DFMT_UNKNOWN;
 }
 
 void CGameApp::FrameAdvance()
@@ -199,30 +231,123 @@ void CGameApp::FrameAdvance()
 
 	m_Timer.Tick(60.f);
 
+	if (!m_bActive) return;
+
+	if (m_bLostDevice)
+	{
+		//Can we reset the device yet?
+		HRESULT hRet = m_pD3DDevice->TestCooperativeLevel();
+		if (hRet == D3DERR_DEVICENOTRESET)//Device available, but not reset. Restore device
+		{
+			m_pD3DDevice->Reset(&m_D3DPresentParams);
+			SetupRenderState();
+			m_bLostDevice = false;
+		}
+		else return;//Device not available yet
+	}	
+
+	ProcessInput();
+
 	AnimateObjects();
 
-	ClearFrameBuffer(COLOR_WHITE);
+	//Clear frame buffer before render scene
+	m_pD3DDevice->Clear(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, COLOR_WHITE, 1.0f, 0);
 
-	//Draw objects
+	//Start scene rendering
+	m_pD3DDevice->BeginScene();
+
+	//Loop trhogut each object
 	for (ULONG i = 0; i < 2; i++)
 	{
 		pMesh = m_pObject[i].m_pMesh;
+
+		m_pD3DDevice->SetTransform(D3DTS_WORLD, &m_pObject[i].m_mtxWorld);
+
 		//Loop through each polygon
 		for (ULONG f = 0; f < pMesh->m_nPolygonCount; f++)
-			DrawPrimitive(pMesh->m_pPolygons[f], &m_pObject[i].m_mtxWorld);
+		{
+			CPolygon* pPolygon = pMesh->m_pPolygon[f];
+
+			m_pD3DDevice->DrawPrimitiveUP(D3DPT_TRIANGLEFAN, pPolygon->m_nVertexCount - 2, pPolygon->m_pVertex, sizeof(CVertex));
+		}//Next polygon
+	}//Next Object
+
+	m_pD3DDevice->EndScene();
+	
+	//Present the buffer
+	if (FAILED(m_pD3DDevice->Present(nullptr, nullptr, nullptr, nullptr)))//wasn't able to present scene, application was minimized
+		m_bLostDevice = true;
+}
+
+void CGameApp::ProcessInput()
+{
+	if (GetKeyState(VK_LEFT) && 0xFF00)
+		m_mtxView._41 += 25.f *m_Timer.GetTimeElapsed();
+	if (GetKeyState(VK_RIGHT) && 0xFF00)
+		m_mtxView._41 -= 25.f *m_Timer.GetTimeElapsed();
+
+	if (m_pD3DDevice) m_pD3DDevice->SetTransform(D3DTS_VIEW, &m_mtxView);
+}
+
+bool CGameApp::InitDirect3D()
+{
+	D3DPRESENT_PARAMETERS presentParams;
+	D3DCAPS9 caps;
+	D3DDISPLAYMODE currentMode;
+	HRESULT hRet;
+
+	//First of all create our D3D Object
+	m_pD3D = Direct3DCreate9(D3D_SDK_VERSION);
+	if (!m_pD3D) return false;
+
+	//Fill out a simple set of present parameters
+	ZeroMemory(&presentParams, sizeof(D3DPRESENT_PARAMETERS));
+
+	//Query default adapter display mod
+	m_pD3D->GetAdapterDisplayMode(D3DADAPTER_DEFAULT, &currentMode);
+	presentParams.BackBufferFormat = currentMode.Format;//select back buffer format
+	presentParams.EnableAutoDepthStencil = true;//We want to create a depth buffer attached to the frame buffer at device creation
+	presentParams.AutoDepthStencilFormat = FindDepthStencilFormat(D3DADAPTER_DEFAULT, currentMode, D3DDEVTYPE_HAL);//Find the correct Depth Stencl format
+
+	presentParams.SwapEffect = D3DSWAPEFFECT_DISCARD;
+	presentParams.Windowed = true;
+
+	//Query hardware capabilities
+	unsigned long ulFlags = D3DCREATE_SOFTWARE_VERTEXPROCESSING;
+
+	//Check if hardware T&L is available
+	ZeroMemory(&caps, sizeof(D3DCAPS9));
+	m_pD3D->GetDeviceCaps(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, &caps);
+	if (caps.DevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT)
+		ulFlags = D3DCREATE_HARDWARE_VERTEXPROCESSING;
+
+	//Attempt to creat a HAL device
+	if (FAILED(hRet = m_pD3D->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, m_hWnd, ulFlags, &presentParams, &m_pD3DDevice)))
+	{
+		//Failed, create a HEL
+		presentParams.AutoDepthStencilFormat = FindDepthStencilFormat(D3DADAPTER_DEFAULT, currentMode, D3DDEVTYPE_REF);
+		// Check if hardware T&L is available
+		ZeroMemory(&caps, sizeof(D3DCAPS9));
+		ulFlags = D3DCREATE_SOFTWARE_VERTEXPROCESSING;
+		m_pD3D->GetDeviceCaps(D3DADAPTER_DEFAULT, D3DDEVTYPE_REF, &caps);
+
+		//Eventhough it's just a HEL, software vertex varies if it's emulating T&L and rasterization or just rasterization
+		if (caps.DevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT)
+			ulFlags = D3DCREATE_HARDWARE_VERTEXPROCESSING;
+
+		//Attempt to create a REF device
+		if (FAILED(hRet - m_pD3D->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_REF, m_hWnd, ulFlags, &presentParams, &m_pD3DDevice)))
+			return false;//Failed
 	}
 
-	//Show FPS
-	m_Timer.GetFrameRate(lpszFPS);
-	TextOut(m_hdcFrameBuffer, 5, 5, lpszFPS, strlen((char*)lpszFPS));
+	m_D3DPresentParams = presentParams;
 
-	//Everything drawn, present frame buffer
-	PresentFrameBuffer();
+	return true;
 }
 
 bool CGameApp::CreateDisplay()
 {
-	LPTSTR windowTitle = _T("Software Render");
+	LPTSTR windowTitle = _T("Initialization");
 	USHORT width = 400;
 	USHORT height = 400;
 	HDC hDC = nullptr;
@@ -235,7 +360,7 @@ bool CGameApp::CreateDisplay()
 	wc.cbClsExtra = 0;
 	wc.cbWndExtra = 0;
 	wc.hInstance = (HINSTANCE)GetModuleHandle(nullptr);
-	wc.hIcon = LoadIcon(wc.hInstance, MAKEINTRESOURCE(IDI_ICON));
+	wc.hIcon = LoadIcon(wc.hInstance, MAKEINTRESOURCE(IDI_ICON1));
 	wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
 	wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
 	wc.lpszMenuName = nullptr;
@@ -243,34 +368,53 @@ bool CGameApp::CreateDisplay()
 	RegisterClass(&wc);
 
 	//Create window
-	m_hWnd = CreateWindow(windowTitle, windowTitle, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, width, height, nullptr, LoadMenu(wc.hInstance, MAKEINTRESOURCE(IDR_MENU)), wc.hInstance, this);
+	m_hWnd = CreateWindow(windowTitle, windowTitle, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 
+		width, height, nullptr, LoadMenu(wc.hInstance, MAKEINTRESOURCE(IDR_MENU)), wc.hInstance, this);
 
 	if (!m_hWnd) return false;//Bail error
 
-							  //Retrieve the final client size of the window
+	//Retrieve the final client size of the window
 	GetClientRect(m_hWnd, &rect);
 	m_nViewX = rect.left;
 	m_nViewY = rect.top;
 	m_nViewWidth = rect.right - rect.left;
 	m_nViewHeight = rect.bottom - rect.top;
 
-	//Build the frame buffer
-	if (!BuildFrameBuffer(width, height)) return false;
-
 	ShowWindow(m_hWnd, SW_SHOW);
+
+	if (!InitDirect3D()) return false;
+
 	return true;
 }
 
 void CGameApp::SetupGameState()
 {
-	float fAspect;
-	D3DXMatrixIdentity(&m_mtxView);
-
-	fAspect = (float)m_nViewWidth / (float)m_nViewHeight;
-	D3DXMatrixPerspectiveFovLH(&m_mtxProjection, D3DXToRadian(60.f), fAspect, 1.01f, 1000.0f);
-
 	m_bRotation1 = true;
 	m_bRotation2 = true;
+
+	m_bActive = true;
+}
+
+void CGameApp::SetupRenderState()
+{
+	//Setup view and projection matrices
+	D3DXMatrixIdentity(&m_mtxView);
+	float fAspect = (float)m_nViewWidth / (float)m_nViewHeight;
+	D3DXMatrixPerspectiveFovLH(&m_mtxProjection, 60.f, fAspect, 1.f, 1000.f);//near clip plane and far cip plane -> Camera frustum
+
+	//Setup our D3D Device initial state
+	m_pD3DDevice->SetRenderState(D3DRS_ZENABLE, D3DZB_TRUE);//Z depth buffer
+	m_pD3DDevice->SetRenderState(D3DRS_DITHERENABLE, TRUE);
+	m_pD3DDevice->SetRenderState(D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
+	m_pD3DDevice->SetRenderState(D3DRS_CULLMODE, D3DCULL_CCW);
+	m_pD3DDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
+
+	//Setup our vertes FVF flags
+	m_pD3DDevice->SetFVF(D3DFVF_XYZ | D3DFVF_DIFFUSE);
+
+	//Setup our matrices
+	m_pD3DDevice->SetTransform(D3DTS_VIEW, &m_mtxView);
+	m_pD3DDevice->SetTransform(D3DTS_PROJECTION, &m_mtxProjection);
 }
 
 void CGameApp::AnimateObjects()
@@ -300,56 +444,6 @@ void CGameApp::AnimateObjects()
 		//Multiplcation order: rotationMtx * worldMtx
 		m_pObject[1].m_mtxWorld = mtxRotate * m_pObject[1].m_mtxWorld;
 	}
-}
-
-void CGameApp::PresentFrameBuffer()
-{
-	HDC hDC = nullptr;
-
-	hDC = GetDC(m_hWnd);
-
-	//Blit the frame buffer to the screen
-	BitBlt(hDC, m_nViewX, m_nViewY, m_nViewWidth, m_nViewHeight, m_hdcFrameBuffer, m_nViewX, m_nViewY, SRCCOPY);
-
-	ReleaseDC(m_hWnd, hDC);
-}
-
-void CGameApp::ClearFrameBuffer(ULONG color)
-{
-	LOGBRUSH logBrush;
-	HBRUSH hBrush = nullptr, hOldBrush = nullptr;
-
-	logBrush.lbStyle = BS_SOLID;
-
-	logBrush.lbColor = COLOR_WHITE & RGB2BGR(color);
-
-	hBrush = CreateBrushIndirect(&logBrush);
-	if (!hBrush) return;
-
-	hOldBrush = (HBRUSH)SelectObject(m_hdcFrameBuffer, hBrush);
-
-	//Draw rectangle
-	Rectangle(m_hdcFrameBuffer, m_nViewX, m_nViewY, m_nViewWidth, m_nViewHeight);
-	SelectObject(m_hdcFrameBuffer, hOldBrush);
-	DeleteObject(hBrush);
-
-}
-
-bool CGameApp::BuildFrameBuffer(ULONG width, ULONG height)
-{
-	HDC hDC = GetDC(m_hWnd);
-	if (!m_hdcFrameBuffer) m_hdcFrameBuffer = CreateCompatibleDC(hDC);
-
-	m_hbmFrameBuffer = CreateCompatibleBitmap(hDC, width, height);
-	if (!m_hbmFrameBuffer) return false;
-
-	//Select new bitmap handler and save previous for later restore
-	m_hbmSelectOut = (HBITMAP)SelectObject(m_hdcFrameBuffer, m_hbmFrameBuffer);
-
-	ReleaseDC(m_hWnd, hDC);
-	SetBkMode(m_hdcFrameBuffer, TRANSPARENT);//Set the frame buffer so it renders correctly (not shown)
-
-	return true;
 }
 
 //Responsible for transforming polygons from modelSpace to screen space and draw them into the screen
